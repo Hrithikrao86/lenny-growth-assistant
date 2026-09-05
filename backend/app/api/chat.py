@@ -91,62 +91,48 @@ async def chat(req: ChatRequest):
             yield "data: " + json.dumps({"type": "sources", "sources": sources}) + "\n\n"
 
             if not chunks:
-    if req.provider == "claude":
-        system_prompt = (
-            "You are Lenny's Growth Assistant. "
-            "Answer the user's question using your knowledge only when it is "
-            "directly relevant to product, growth, startups, or leadership. "
-            "Be concise and useful. Clearly state when the answer is not "
-            "supported by the available podcast archive."
-        )
+                provider = get_provider(req.provider)
+                system_prompt = (
+                    "You are Lenny's Growth Assistant. "
+                    "Answer the user's question helpfully and concisely. "
+                    "If transcript evidence is unavailable, clearly say that "
+                    "the answer is not grounded in the podcast archive."
+                )
 
-        provider = get_provider(req.provider)
-        yield "data: " + json.dumps(
-            {"type": "status", "content": "Generating with Claude…"}
-        ) + "\n\n"
-
-        full_response = ""
-        try:
-            async for token in provider.generate_response(
-                history + [{"role": "user", "content": req.message}],
-                system_prompt,
-            ):
-                full_response += token
+                messages = history + [{"role": "user", "content": req.message}]
                 yield "data: " + json.dumps(
-                    {"type": "token", "content": token}
+                    {"type": "status", "content": f"Generating with {req.provider}…"}
                 ) + "\n\n"
 
-            assistant_message = Message(
-                session_id=session_id,
-                role="assistant",
-                content=full_response,
-                sources=[],
-            )
-            db.add(assistant_message)
-            await db.commit()
-            yield "data: [DONE]\n\n"
-            return
+                full_response = ""
+                try:
+                    async for token in provider.generate_response(messages, system_prompt):
+                        full_response += token
+                        yield "data: " + json.dumps(
+                            {"type": "token", "content": token}
+                        ) + "\n\n"
+                except Exception as exc:
+                    logger.exception(
+                        "llm_failed",
+                        extra={"provider": req.provider, "session_id": str(session_id)},
+                    )
+                    await db.rollback()
+                    yield "data: " + json.dumps(
+                        {"type": "error", "content": f"{req.provider} is unavailable: {exc}"}
+                    ) + "\n\n"
+                    return
 
-        except Exception as exc:
-            logger.exception("llm_failed", extra={"provider": req.provider})
-            await db.rollback()
-            yield "data: " + json.dumps(
-                {"type": "error", "content": f"Claude is unavailable: {exc}"}
-            ) + "\n\n"
-            return
+                assistant_message = Message(
+                    session_id=session_id,
+                    role="assistant",
+                    content=full_response,
+                    sources=[],
+                )
+                db.add(assistant_message)
+                await db.commit()
 
-    answer = "I do not have sufficient information in Lenny's podcast archive to answer this."
-    assistant_message = Message(
-        session_id=session_id,
-        role="assistant",
-        content=answer,
-        sources=[],
-    )
-    db.add(assistant_message)
-    await db.commit()
-    yield "data: " + json.dumps({"type": "token", "content": answer}) + "\n\n"
-    yield "data: [DONE]\n\n"
-    return
+                yield "data: [DONE]\n\n"
+                return
 
             context = format_context(chunks)
             if req.mode == "ship30":
