@@ -18,8 +18,6 @@ logging.basicConfig(
 app = FastAPI(title="The Lenny Growth Assistant", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
-    app.add_middleware(
-    CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
         "https://lenny-growth-assistant-mu.vercel.app",
@@ -27,8 +25,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-
-))
+)
 
 
 @app.on_event("startup")
